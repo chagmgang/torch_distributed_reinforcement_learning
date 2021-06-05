@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import numpy as np
 
 def split_data(x):
@@ -84,6 +85,62 @@ def compute_baseline_loss(vs, values):
     error = vs.detach() - values
     l2_loss = error ** 2
     return torch.sum(l2_loss)
+
+def compute_ent_loss(pi):
+    log_prob = torch.log(pi)
+    ent_per_timestep = -pi * log_prob
+    return -torch.sum(ent_per_timestep)
+
+class ImpalaLoss(nn.Module):
+
+    def __init__(self, discount=0.99, baseline_coef=1.0, ent_coef=0.05):
+        super(ImpalaLoss, self).__init__()
+
+        self.discount = discount
+        self.baseline_coef = 1.0
+        self.ent_coef = 0.05
+
+    def forward(self, pi, mu, action, values,
+                next_values, reward, done):
+
+        discounts = (1 - done) * self.discount
+        
+        first_pi, second_pi, third_pi = split_data(pi)
+        first_mu, second_mu, third_mu = split_data(mu)
+        first_action, second_action, third_action = split_data(action)
+        first_v, second_v, third_v = split_data(values)
+        first_nv, second_nv, third_nv = split_data(next_values)
+        first_r, second_r, third_r = split_data(reward)
+        first_d, second_d, third_d = split_data(discounts)
+
+        vs, clipped_pg_rhos = from_softmax(
+                behavior_policy=first_mu, target_policy=first_pi,
+                actions=first_action, discounts=first_d,
+                rewards=first_r, values=first_v,
+                next_values=first_nv)
+
+        vs_plus_1, _ = from_softmax(
+                behavior_policy=second_mu, target_policy=second_pi,
+                actions=second_action, discounts=second_d,
+                rewards=second_r, values=second_v,
+                next_values=second_nv)
+
+        pg_advantage = clipped_pg_rhos * \
+                (first_r + first_d * vs_plus_1 - first_v)
+
+        pi_loss = compute_policy_gradient_loss(
+                first_pi, first_action, pg_advantage)
+
+        value_loss = compute_baseline_loss(
+                vs, first_v)
+
+        ent = compute_ent_loss(first_pi)
+
+        tot_loss = pi_loss + \
+                value_loss * self.baseline_coef + \
+                ent + self.ent_coef
+
+        return tot_loss
 
 if __name__ == '__main__':
     

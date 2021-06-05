@@ -10,7 +10,7 @@ def main():
 
     env = gym.make('CartPole-v0')
     buffers = ImpalaBuffer(
-            trajectory=5, buffer_size=128)
+            trajectory=20, buffer_size=128)
 
     agent = ImpalaAgent(
             model=Model(),
@@ -28,12 +28,12 @@ def main():
 
         next_state, reward, done, _ = env.step(action)
 
+        score += reward
         buffers.append(
                 state, next_state,
                 action, reward,
-                done, mu=mu)
+                done, mu)
 
-        score += reward
         state = next_state
 
         if done:
