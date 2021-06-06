@@ -2,6 +2,7 @@ import ray
 import gym
 import time
 import torch
+import multiprocessing
 
 from rl.model.cartpole import Model
 from rl.buffer.impala import LocalBuffer
@@ -71,6 +72,57 @@ class Actor(object):
                 score = 0
                 episode += 1
 
+@ray.remote
+class Learner(object):
+
+    def __init__(self, policy, trajectory, buffer_size, batch_size):
+
+        self.writer = SummaryWriter('runs/learner')
+        self.policy = policy
+
+        self.global_buffer = GlobalBuffer(
+                trajectory=trajectory,
+                buffer_size=buffer_size)
+
+        self.batch_size = batch_size
+        self.train_step = 0
+
+        self.running = Thread(
+                target=self.train)
+        self.running.start()
+
+    def get_weights(self):
+        return self.policy.get_weights()
+
+    def train(self):
+        
+        while True:
+            
+            if len(self.global_buffer) > 2 * self.batch_size:
+
+                self.train_step += 1
+                train_data = self.global_buffer.sample(self.batch_size)
+                p_loss, v_loss, ent = self.policy.train(
+                        state=train_data.state, next_state=train_data.next_state,
+                        reward=train_data.reward, done=train_data.done,
+                        action=train_data.action, mu=train_data.mu)
+
+                self.writer.add_scalar('data/pi_loss', float(p_loss), self.train_step)
+                self.writer.add_scalar('data/value_loss', float(v_loss), self.train_step)
+                self.writer.add_scalar('data/ent', float(ent), self.train_step)
+
+
+    def append(self, state, next_state, action,
+               reward, done, mu):
+        
+        self.global_buffer.append(
+                    state=state,
+                    next_state=next_state,
+                    action=action,
+                    reward=reward,
+                    done=done,
+                    mu=mu)
+
 def main(num_workers):
 
     trajectory = 20
@@ -79,20 +131,22 @@ def main(num_workers):
 
     writer = SummaryWriter('runs/learner')
 
-    global_buffer = GlobalBuffer(
-            trajectory=trajectory,
-            buffer_size=buffer_size)
-    learner = ImpalaAgent(
+    policy = ImpalaAgent(
             model=Model(), action_size=2,
             device=torch.device('cpu'))
-
-    train_step = 0
+    learner = Learner.remote(
+            policy=policy,
+            trajectory=trajectory,
+            buffer_size=buffer_size,
+            batch_size=batch_size)
 
     agents = [
             Actor.remote(actor_id=i, trajectory=trajectory)
             for i in range(num_workers)]
 
-    params = learner.get_weights()
+    params = [learner.get_weights.remote()]
+    done_id, params = ray.wait(params)
+    params = ray.get(done_id)[0]
     samples = [agent.set_weights.remote(params) for agent in agents]
 
     while True:
@@ -102,7 +156,7 @@ def main(num_workers):
         if info['data'] is not None:
 
             data = info['data']
-            global_buffer.append(
+            learner.append.remote(
                     state=data.state,
                     next_state=data.next_state,
                     action=data.action,
@@ -110,21 +164,13 @@ def main(num_workers):
                     done=data.done,
                     mu=data.mu)
 
-        if len(global_buffer) > 2 * batch_size:
-            train_data = global_buffer.sample(batch_size)
-            p_loss, v_loss, ent = learner.train(
-                    state=train_data.state, next_state=train_data.next_state,
-                    reward=train_data.reward, done=train_data.done,
-                    action=train_data.action, mu=train_data.mu)
-            train_step += 1
-            writer.add_scalar('data/pi_loss', float(p_loss), train_step)
-            writer.add_scalar('data/value_loss', float(v_loss), train_step)
-            writer.add_scalar('data/ent', float(ent), train_step)
-
-        params = learner.get_weights()
+        params = [learner.get_weights.remote()]
+        done_id, params = ray.wait(params)
+        params = ray.get(done_id)[0]
         samples.extend([
             agents[info['id']].set_weights.remote(params)])
 
 if __name__ == '__main__':
     ray.init()
-    main(num_workers=4)
+    cpu_count = multiprocessing.cpu_count()
+    main(num_workers=cpu_count)
