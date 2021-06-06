@@ -119,3 +119,14 @@ class ImpalaBuffer:
     def get_latest_data(self, deque, size):
         latest = [deque[-(i+1)] for i in range(size)]
         return np.stack(latest)
+
+class GlobalBuffer(ImpalaBuffer):
+
+    def append(self, state, next_state, action, reward, done, mu):
+
+        self.state.append(np.stack(state))
+        self.next_state.append(np.stack(next_state))
+        self.action.append(np.stack(action))
+        self.reward.append(np.stack(reward))
+        self.done.append(np.stack(done))
+        self.mu.append(mu)
