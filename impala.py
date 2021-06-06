@@ -2,6 +2,7 @@ import ray
 import gym
 import time
 import torch
+import multiprocessing
 
 from rl.model.cartpole import Model
 from rl.buffer.impala import LocalBuffer
@@ -90,6 +91,9 @@ class Learner(object):
                 target=self.train)
         self.running.start()
 
+    def get_weights(self):
+        return self.policy.get_weights()
+
     def train(self):
         
         while True:
@@ -140,7 +144,9 @@ def main(num_workers):
             Actor.remote(actor_id=i, trajectory=trajectory)
             for i in range(num_workers)]
 
-    params = policy.get_weights()
+    params = [learner.get_weights.remote()]
+    done_id, params = ray.wait(params)
+    params = ray.get(done_id)[0]
     samples = [agent.set_weights.remote(params) for agent in agents]
 
     while True:
@@ -158,10 +164,13 @@ def main(num_workers):
                     done=data.done,
                     mu=data.mu)
 
-        params = policy.get_weights()
+        params = [learner.get_weights.remote()]
+        done_id, params = ray.wait(params)
+        params = ray.get(done_id)[0]
         samples.extend([
             agents[info['id']].set_weights.remote(params)])
 
 if __name__ == '__main__':
     ray.init()
-    main(num_workers=4)
+    cpu_count = multiprocessing.cpu_count()
+    main(num_workers=cpu_count)
