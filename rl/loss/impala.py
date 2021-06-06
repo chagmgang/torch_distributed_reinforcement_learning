@@ -97,8 +97,8 @@ class ImpalaLoss(nn.Module):
         super(ImpalaLoss, self).__init__()
 
         self.discount = discount
-        self.baseline_coef = 1.0
-        self.ent_coef = 0.05
+        self.baseline_coef = baseline_coef
+        self.ent_coef = ent_coef
 
     def forward(self, pi, mu, action, values,
                 next_values, reward, done):
@@ -140,7 +140,7 @@ class ImpalaLoss(nn.Module):
                 value_loss * self.baseline_coef + \
                 ent + self.ent_coef
 
-        return tot_loss
+        return tot_loss, pi_loss, value_loss, ent
 
 if __name__ == '__main__':
     

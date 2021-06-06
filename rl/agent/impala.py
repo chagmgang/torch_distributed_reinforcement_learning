@@ -19,6 +19,12 @@ class ImpalaAgent:
 
         self.model.eval()
 
+    def get_weights(self):
+        return self.model.state_dict()
+
+    def set_weights(self, param):
+        self.model.load_state_dict(param)
+
     def get_action(self, x):
         x = torch.as_tensor([x]).to(torch.float).to(self.device)
         prob, _ = self.model(x)
@@ -51,7 +57,7 @@ class ImpalaAgent:
             next_values.append(v)
         next_values = torch.stack(next_values)[:, :, 0]
 
-        tot_loss = self.criterion(
+        tot_loss, pi_loss, value_loss, ent = self.criterion(
                 pi, mu, action,
                 values, next_values,
                 reward, done)
@@ -60,3 +66,5 @@ class ImpalaAgent:
         self.optim.step()
 
         self.model.eval()
+
+        return pi_loss, value_loss, ent
