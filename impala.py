@@ -59,6 +59,8 @@ class Actor(object):
             next_state, reward, done, _ = self.env.step(action)
 
             score += reward
+            if done:
+                reward = -1
             self.local_buffer.append(
                     state, next_state, action,
                     reward, done, mu)
@@ -100,6 +102,7 @@ class Learner(object):
             
             if len(self.global_buffer) > 2 * self.batch_size:
 
+                s = time.time()
                 self.train_step += 1
                 train_data = self.global_buffer.sample(self.batch_size)
                 p_loss, v_loss, ent = self.policy.train(
@@ -110,7 +113,7 @@ class Learner(object):
                 self.writer.add_scalar('data/pi_loss', float(p_loss), self.train_step)
                 self.writer.add_scalar('data/value_loss', float(v_loss), self.train_step)
                 self.writer.add_scalar('data/ent', float(ent), self.train_step)
-
+                self.writer.add_scalar('data/time', time.time() - s, self.train_step)
 
     def append(self, state, next_state, action,
                reward, done, mu):
@@ -126,8 +129,8 @@ class Learner(object):
 def main(num_workers):
 
     trajectory = 20
-    batch_size = 16
-    buffer_size = 128
+    batch_size = 32
+    buffer_size = 256
 
     writer = SummaryWriter('runs/learner')
 
