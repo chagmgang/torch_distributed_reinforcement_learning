@@ -13,7 +13,7 @@ class ImpalaAgent:
         self.device = device
 
         self.optim = torch.optim.RMSprop(
-                self.model.parameters(), lr=1e-4)
+                self.model.parameters(), lr=1e-3)
 
         self.criterion = ImpalaLoss()
 
