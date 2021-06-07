@@ -26,10 +26,11 @@ def main():
         done = False
         score = 0
         episode += 1
+        epsilon = 1 / (episode * 0.05 + 1)
 
         while not done:
 
-            action = agent.get_action(state)
+            action = agent.get_action(state, epsilon)
             next_state, reward, done, _ = env.step(action)
 
             score += reward

@@ -23,7 +23,7 @@ class DQNAgent:
         self.device = device
 
         self.optim = torch.optim.Adam(
-                self.main.parameters(), lr=1e-3)
+                self.main.parameters(), lr=1e-4)
 
         self.criterion = DQNLoss()
 
@@ -31,13 +31,18 @@ class DQNAgent:
         return self.main.state_dict()
 
     def set_weights(self, param):
-        self.main.load_state_dict()
+        self.main.load_state_dict(param)
 
-    def get_action(self, x):
+    def get_action(self, x, epsilon):
         x = torch.as_tensor([x]).to(torch.float).to(self.device)
         value = self.main(x)
         value = value.detach().cpu().numpy()[0]
-        action = np.argmax(value)
+        
+        if np.random.rand() > epsilon:
+            action = np.argmax(value)
+        else:
+            action = np.random.choice(self.action_size)
+
         return action
 
     def td_error(self, state, next_state, action, reward, done):
