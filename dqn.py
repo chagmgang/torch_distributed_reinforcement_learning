@@ -13,7 +13,7 @@ def main():
     agent = DQNAgent(
             model=ValueModel(),
             action_size=2,
-            device=torch.device('cpu'))
+            device=torch.device(0))
 
     replay_buffer = Memory(capacity=int(1e5))
     episode = 0

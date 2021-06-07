@@ -2,6 +2,37 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class Model(nn.Module):
+
+    def __init__(self):
+        super(Model, self).__init__()
+
+        self.conv1 = nn.Conv2d(4, 32, 8, stride=4)
+        self.conv2 = nn.Conv2d(32, 64, 4, stride=2)
+        self.conv3 = nn.Conv2d(64, 64, 3, stride=1)
+        self.fc1 = nn.Linear(7*7*64, 512)
+        self.fc2 = nn.Linear(512, 512)
+
+        self.policy = nn.Linear(512, 4)
+        self.value = nn.Linear(512, 1)
+
+        self.softmax = nn.Softmax()
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = x.view(-1, 7*7*64)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+
+        p = self.policy(x)
+        v = self.value(x)
+
+        prob = self.softmax(p)
+
+        return prob, v
+
 class ValueModel(nn.Module):
 
     def __init__(self):

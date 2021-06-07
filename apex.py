@@ -12,10 +12,11 @@ from rl.agent.dqn import DQNAgent
 from rl.model.breakout import ValueModel
 from env.map_wrappers import make_float_env
 
+from collections import OrderedDict
 from tensorboardX import SummaryWriter
 from threading import Thread
 
-@ray.remote(memory=1024 * 1024 * 256)
+@ray.remote(memory=1024 * 1024 * 256, num_cpus=1)
 class Actor(object):
 
     def __init__(self, actor_id, policy, action_size, buffer_size, batch_size):
@@ -25,6 +26,8 @@ class Actor(object):
         self.id = actor_id
         self.buffer_size = buffer_size
         self.batch_size = batch_size
+
+        print(f'actor {self.id} available :', torch.cuda.is_available())
 
         self.writer = SummaryWriter(f'runs/{self.id}')
 
@@ -90,7 +93,7 @@ class Actor(object):
             print(f'actor id : {self.id} | episode : {episode} | score : {score} | eps : {epsilon}')
     
 
-@ray.remote(memory=1024 * 1024 * 256)
+@ray.remote(memory=1024 * 1024 * 1024 * 4, num_gpus=1)
 class Learner(object):
 
     def __init__(self, policy, buffer_size, batch_size):
@@ -134,6 +137,7 @@ class Learner(object):
 
                 self.writer.add_scalar('data/loss', float(loss), self.train_step)
                 self.writer.add_scalar('data/time', time.time() - s, self.train_step)
+                self.writer.add_scalar('data/data_size', self.replay_size, self.train_step)
 
                 for i in range(len(idxs)):
                     self.replay_buffer.update(idxs[i], td_error[i])
@@ -142,6 +146,7 @@ class Learner(object):
                     self.policy.main_to_target()
 
     def get_weights(self):
+        params = self.policy.get_weights()
         return self.policy.get_weights()
 
     def append(self, state, next_state, action,
@@ -162,17 +167,22 @@ class Learner(object):
                     [state[i], next_state[i],
                      action[i], reward[i], done[i]])
 
+def convert_gpu_to_cpu(params):
+    new_params = OrderedDict()
+    for key, value in params.items():
+        new_params[key] = value.to('cpu')
+    return new_params
 
 def main(num_workers):
 
     batch_size = 64
-    buffer_size = 1e3
+    buffer_size = 1e5
     action_size = 4
 
     policy = DQNAgent(
             model=ValueModel(),
             action_size=action_size,
-            device=torch.device('cpu'))
+            device=torch.device(0))
 
     learner = Learner.remote(
             policy=policy,
@@ -192,9 +202,11 @@ def main(num_workers):
 
     params = [learner.get_weights.remote()]
     done_id, params = ray.wait(params)
-    params = ray.get(done_id)[0]
+    params = ray.get(done_id)[0] 
+    params = convert_gpu_to_cpu(params)
     samples = [agent.set_weights.remote(params) for agent in agents]
-
+    
+    
     while True:
 
         done_id, samples = ray.wait(samples)
@@ -211,11 +223,12 @@ def main(num_workers):
         params = [learner.get_weights.remote()]
         done_id, params = ray.wait(params)
         params = ray.get(done_id)[0]
+        params = convert_gpu_to_cpu(params)
         samples.extend([
             agents[info['id']].set_weights.remote(params)])
 
 if __name__ == '__main__':
-    ray.init()
+    ray.init(num_gpus=1)
     cpu_count = multiprocessing.cpu_count()
-    cpu_count = 4
+    cpu_count = 32
     main(num_workers=cpu_count)
