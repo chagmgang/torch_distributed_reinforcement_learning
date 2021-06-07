@@ -9,17 +9,18 @@ import numpy as np
 from rl.buffer.apex import LocalBuffer
 from rl.buffer.apex import Memory
 from rl.agent.dqn import DQNAgent
-from rl.model.cartpole import ValueModel
+from rl.model.breakout import ValueModel
+from env.map_wrappers import make_float_env
 
 from tensorboardX import SummaryWriter
 from threading import Thread
 
-@ray.remote
+@ray.remote(memory=1024 * 1024 * 256)
 class Actor(object):
 
-    def __init__(self, actor_id, policy, buffer_size, batch_size):
+    def __init__(self, actor_id, policy, action_size, buffer_size, batch_size):
 
-        self.env = gym.make('CartPole-v0')
+        self.env = make_float_env("BreakoutDeterministic-v4")
         self.local_buffer = LocalBuffer(int(buffer_size))
         self.id = actor_id
         self.buffer_size = buffer_size
@@ -29,7 +30,7 @@ class Actor(object):
 
         self.policy = DQNAgent(
                 model=ValueModel(),
-                action_size=2,
+                action_size=action_size,
                 device=torch.device('cpu'))
 
         self.running = Thread(
@@ -60,35 +61,36 @@ class Actor(object):
             score = 0
             episode += 1
             epsilon = 1 / (episode * 0.05 + 1)
+            lives = 5
 
             while not done:
 
                 action = self.policy.get_action(state, epsilon)
-                next_state, reward, done, _ = self.env.step(action)
+                next_state, reward, done, info = self.env.step(action)
 
                 score += reward
 
-                reward = 0
-                if done:
-                    if score == 200:
-                        reward = 1
-                    else:
-                        reward = -1
+                if lives != info['ale.lives']:
+                    r = -1
+                    d = True
+                else:
+                    r = reward
+                    d = False
 
                 self.local_buffer.append(
                         state=state, next_state=next_state,
-                        action=action, reward=reward,
-                        done=done)
+                        action=action, reward=r, done=d)
 
                 state = next_state
+                lives = info['ale.lives']
 
             self.writer.add_scalar('data/score', score, episode)
             self.writer.add_scalar('data/epsilon', epsilon, episode)
 
-            print(f'actor id : {self.id} | episode : {episode} | scoddre : {score} | eps : {epsilon}')
+            print(f'actor id : {self.id} | episode : {episode} | score : {score} | eps : {epsilon}')
     
 
-@ray.remote
+@ray.remote(memory=1024 * 1024 * 256)
 class Learner(object):
 
     def __init__(self, policy, buffer_size, batch_size):
@@ -164,11 +166,12 @@ class Learner(object):
 def main(num_workers):
 
     batch_size = 64
-    buffer_size = 1e5
+    buffer_size = 1e3
+    action_size = 4
 
     policy = DQNAgent(
             model=ValueModel(),
-            action_size=2,
+            action_size=action_size,
             device=torch.device('cpu'))
 
     learner = Learner.remote(
@@ -181,11 +184,11 @@ def main(num_workers):
                 actor_id=i,
                 policy=DQNAgent(
                     model=ValueModel(),
-                    action_size=2,
+                    action_size=action_size,
                     device=torch.device('cpu')),
+                action_size=action_size,
                 buffer_size=2*batch_size,
-                batch_size=batch_size,
-                ) for i in range(num_workers)]
+                batch_size=batch_size) for i in range(num_workers)]
 
     params = [learner.get_weights.remote()]
     done_id, params = ray.wait(params)
@@ -211,8 +214,8 @@ def main(num_workers):
         samples.extend([
             agents[info['id']].set_weights.remote(params)])
 
-
 if __name__ == '__main__':
     ray.init()
     cpu_count = multiprocessing.cpu_count()
-    main(num_workers=4)
+    cpu_count = 4
+    main(num_workers=cpu_count)
