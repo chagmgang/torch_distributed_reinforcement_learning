@@ -6,26 +6,6 @@ import numpy as np
 from rl.loss.vtrace import ImpalaLoss
 
 
-def compute_baseline_loss(advantages):
-    return 0.5 * torch.sum(advantages ** 2)
-
-
-def compute_entropy_loss(logits):
-    """Return the entropy loss, i.e., the negative entropy of the policy."""
-    policy = F.softmax(logits, dim=-1)
-    log_policy = F.log_softmax(logits, dim=-1)
-    return torch.sum(policy * log_policy)
-
-
-def compute_policy_gradient_loss(logits, actions, advantages):
-    cross_entropy = F.nll_loss(
-        F.log_softmax(torch.flatten(logits, 0, 1), dim=-1),
-        target=torch.flatten(actions, 0, 1),
-        reduction="none",
-    )
-    cross_entropy = cross_entropy.view_as(advantages)
-    return torch.sum(cross_entropy * advantages.detach())
-
 class ImpalaAgent:
 
     def __init__(self, model, action_size, device):
@@ -35,7 +15,11 @@ class ImpalaAgent:
         self.device = device
 
         self.optim = torch.optim.RMSprop(
-                self.model.parameters(), lr=0.00048)
+                self.model.parameters(),
+                lr=0.00048,
+                momentum=0,
+                eps=0.01,
+                alpha=0.99)
 
         self.criterion = ImpalaLoss()
         self.discount = 0.99
@@ -79,41 +63,6 @@ class ImpalaAgent:
             next_values.append(v)
         next_values = torch.stack(next_values)[:, :, 0]
 
-        '''
-        discounts = (1 - done).float() * self.discount
-
-        actor_outputs = torch.transpose(mu, 0, 1)
-        learner_outputs = torch.transpose(pi, 0, 1)
-        actions = torch.transpose(action, 0, 1)
-        discounts = torch.transpose(discounts, 0, 1)
-        rewards = torch.transpose(reward, 0, 1)
-        values = torch.transpose(values, 0, 1)
-        bootstrap_value = torch.transpose(next_values, 0, 1)[-1]
-        
-        vtrace_returns = from_logits(
-                behavior_policy_logits=actor_outputs,
-                target_policy_logits=learner_outputs,
-                actions=actions,
-                discounts=discounts,
-                rewards=rewards,
-                values=values,
-                bootstrap_value=bootstrap_value)
-
-        pg_loss = compute_policy_gradient_loss(
-                learner_outputs,
-                actions,
-                vtrace_returns.pg_advantages)
-
-        baseline_loss = compute_baseline_loss(
-                vtrace_returns.vs - values)
-
-        entropy_loss = compute_entropy_loss(
-            learner_outputs
-        )
-
-        total_loss = pg_loss + baseline_loss * 0.5 + entropy_loss * 0.0006
-        '''
-
         total_loss, pg_loss, baseline_loss, entropy_loss = self.criterion(
                 behavior_policy_logits=mu,
                 target_policy_logits=pi,
@@ -123,6 +72,7 @@ class ImpalaAgent:
 
         self.optim.zero_grad()
         total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 40.0)
         self.optim.step()
 
         self.model.eval()

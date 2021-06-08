@@ -123,6 +123,30 @@ class Learner(object):
         self.batch_size = batch_size
         self.train_step = 0
 
+        self.thread = Thread(
+                target=self.train)
+        self.thread.start()
+
+    def train(self):
+
+        while True:
+
+            if len(self.global_buffer) > 2 * self.batch_size:
+
+                s = time.time()
+                self.train_step += 1
+                sample = self.global_buffer.sample(self.batch_size)
+                p_loss, v_loss, ent = self.policy.train(
+                        state=sample.state, next_state=sample.next_state,
+                        reward=sample.reward, done=sample.done,
+                        action=sample.action, mu=sample.mu)
+
+                self.writer.add_scalar('data/pi_loss', float(p_loss), self.train_step)
+                self.writer.add_scalar('data/value_loss', float(v_loss), self.train_step)
+                self.writer.add_scalar('data/ent', float(ent), self.train_step)
+                self.writer.add_scalar('data/time', time.time() - s, self.train_step)
+            
+
     def get_weights(self):
         return self.policy.get_weights()
 
@@ -134,21 +158,6 @@ class Learner(object):
                 reward=reward, done=done,
                 action=action, mu=mu)
 
-
-        if len(self.global_buffer) > 2 * self.batch_size:
-
-            s = time.time()
-            self.train_step += 1
-            sample = self.global_buffer.sample(self.batch_size)
-            p_loss, v_loss, ent = self.policy.train(
-                    state=sample.state, next_state=sample.next_state,
-                    reward=sample.reward, done=sample.done,
-                    action=sample.action, mu=sample.mu)
-
-            self.writer.add_scalar('data/pi_loss', float(p_loss), self.train_step)
-            self.writer.add_scalar('data/value_loss', float(v_loss), self.train_step)
-            self.writer.add_scalar('data/ent', float(ent), self.train_step)
-            self.writer.add_scalar('data/time', time.time() - s, self.train_step)
 
 def main(num_workers):
 
