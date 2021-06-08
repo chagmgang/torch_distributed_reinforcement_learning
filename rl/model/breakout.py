@@ -33,6 +33,19 @@ class Model(nn.Module):
 
         return prob, v
 
+    def get_logit(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = x.view(-1, 7*7*64)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+
+        p = self.policy(x)
+        v = self.value(x)
+
+        return p, v
+
 class ValueModel(nn.Module):
 
     def __init__(self):

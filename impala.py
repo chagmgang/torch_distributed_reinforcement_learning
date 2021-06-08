@@ -4,12 +4,13 @@ import time
 import torch
 import multiprocessing
 
-from rl.model.cartpole import Model
+from rl.model.breakout import Model
 from rl.buffer.impala import LocalBuffer
 from rl.buffer.impala import GlobalBuffer
 from rl.agent.impala import ImpalaAgent
-from tensorboardX import SummaryWriter
+from env.map_wrappers import make_float_env
 
+from tensorboardX import SummaryWriter
 from collections import OrderedDict
 from threading import Thread
 
@@ -34,13 +35,11 @@ class Trajectory:
         self.action = action
 
 
-@ray.remote(num_cpus=1)
+@ray.remote(num_cpus=1, memory=1024*1024*256)
 class Actor(object):
 
     def __init__(self, actor_id, policy, trajectory):
 
-        self.env = gym.make('CartPole-v0')
-        
         self.id = actor_id
         self.trajectory = trajectory
 
@@ -53,12 +52,14 @@ class Actor(object):
 
     def start_env(self):
 
-        self.env = gym.make('CartPole-v0')
+        self.env = make_float_env("BreakoutDeterministic-v4")
         self.state = self.env.reset()
         self.done = False
         self.episode += 1
         self.episode_step = 0
         self.score = 0
+        self.lives = 5
+        self.prob = 0
 
     def rollout(self, params):
 
@@ -74,22 +75,24 @@ class Actor(object):
         for t in range(self.trajectory):
             
             self.action, self.mu = self.policy.get_action(self.state)
-            self.next_state, self.reward, self.done, _ = self.env.step(self.action)
+            self.next_state, self.reward, self.done, self.info = self.env.step(self.action)
+
             self.score += self.reward
             self.episode_step += 1
+            self.prob += self.mu[self.action]
 
-            self.r = 0
-            if self.done:
-                if self.score == 200:
-                    self.r = 1
-                else:
-                    self.r = -1
+            if self.lives != self.info['ale.lives']:
+                self.r = -1
+                self.d = True
+            else:
+                self.r = self.reward
+                self.d = False
 
             states.append(self.state)
             next_states.append(self.next_state)
             actions.append(self.action)
             rewards.append(self.r)
-            dones.append(self.done)
+            dones.append(self.d)
             mus.append(self.mu)
 
             self.state = self.next_state
@@ -97,19 +100,22 @@ class Actor(object):
             if self.done:
                 self.writer.add_scalar('data/score', self.score, self.episode)
                 self.writer.add_scalar('data/episode_step', self.episode_step, self.episode)
+                self.writer.add_scalar('data/prob', self.prob / self.episode_step, self.episode)
                 print(f'actor : {self.id} | episode : {self.episode} | score : {self.score}')
                 self.state = self.env.reset()
                 self.done = False
                 self.score = 0
                 self.episode += 1
                 self.episode_step = 0
+                self.lives = 5
+                self.prob = 0
 
         return Trajectory(
                 state=np.stack(states), next_state=np.stack(next_states),
                 action=np.stack(actions), reward=np.stack(rewards),
                 done=np.stack(dones), mu=np.stack(mus)), {'id': self.id}
 
-@ray.remote(num_gpus=1)
+@ray.remote(num_gpus=1, memory=1024*1024*1024*4)
 class Learner(object):
 
     def __init__(self, policy, trajectory, buffer_size, batch_size):
@@ -164,7 +170,7 @@ def main(num_workers):
     trajectory = 20
     batch_size = 32
     buffer_size = 10 * batch_size
-    action_size = 2
+    action_size = 4
 
     writer = SummaryWriter('runs/learner')
 
@@ -214,5 +220,5 @@ def main(num_workers):
 if __name__ == '__main__':
     ray.init(num_gpus=1)
     cpu_count = multiprocessing.cpu_count()
-    cpu_count = 32
+    cpu_count = 16
     main(num_workers=cpu_count)

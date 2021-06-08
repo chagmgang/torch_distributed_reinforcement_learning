@@ -16,7 +16,7 @@ class ImpalaAgent:
 
         self.optim = torch.optim.RMSprop(
                 self.model.parameters(),
-                lr=0.00048,
+                lr=0.0006,
                 momentum=0,
                 eps=0.01,
                 alpha=0.99)
