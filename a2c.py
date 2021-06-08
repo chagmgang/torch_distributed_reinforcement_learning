@@ -1,13 +1,13 @@
 import gym
 import torch
 
-from rl.agent.a2c import A2CAgent
+from rl.agent.impala import ImpalaAgent
 from rl.model.cartpole import Model
 
 def main():
 
     env = gym.make('CartPole-v0')
-    agent = A2CAgent(
+    agent = ImpalaAgent(
             model=Model(),
             action_size=2,
             device=torch.device('cpu'))
@@ -24,19 +24,27 @@ def main():
         actions = []
         rewards = []
         dones = []
+        mus = []
 
         for _ in range(32):
             
-            action = agent.get_action(state)
+            action, mu = agent.get_action(state)
             next_state, reward, done, _ = env.step(action)
 
             score += reward
+            r = 0
+            if done:
+                if score == 200:
+                    r = 1
+                else:
+                    r = -1
 
             states.append(state)
             next_states.append(next_state)
-            rewards.append(reward)
+            rewards.append(r)
             dones.append(done)
             actions.append(action)
+            mus.append(mu)
 
             state = next_state
 
@@ -49,8 +57,8 @@ def main():
                 
 
         agent.train(
-                states, next_states,
-                rewards, dones, actions)
+                [states], [next_states],
+                [rewards], [dones], [actions], [mus])
 
 if __name__ == '__main__':
     main()

@@ -28,6 +28,16 @@ class Model(nn.Module):
 
         return prob, v
 
+    def get_logit(self, x):
+        x = self.relu(self.l1(x))
+        x = self.relu(self.l2(x))
+
+        p = self.p1(x)
+
+        v = self.v1(x)
+
+        return p, v
+
 class ValueModel(nn.Module):
 
     def __init__(self):

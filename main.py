@@ -34,7 +34,7 @@ class Trajectory:
         self.action = action
 
 
-@ray.remote
+@ray.remote(num_cpus=1)
 class Actor(object):
 
     def __init__(self, actor_id, policy, trajectory):
@@ -109,7 +109,7 @@ class Actor(object):
                 action=np.stack(actions), reward=np.stack(rewards),
                 done=np.stack(dones), mu=np.stack(mus)), {'id': self.id}
 
-@ray.remote
+@ray.remote(num_gpus=1)
 class Learner(object):
 
     def __init__(self, policy, trajectory, buffer_size, batch_size):
@@ -134,6 +134,7 @@ class Learner(object):
                 reward=reward, done=done,
                 action=action, mu=mu)
 
+
         if len(self.global_buffer) > 2 * self.batch_size:
 
             s = time.time()
@@ -153,7 +154,7 @@ def main(num_workers):
 
     trajectory = 20
     batch_size = 32
-    buffer_size = 256
+    buffer_size = 10 * batch_size
     action_size = 2
 
     writer = SummaryWriter('runs/learner')
@@ -162,7 +163,7 @@ def main(num_workers):
             policy=ImpalaAgent(
                 model=Model(),
                 action_size=action_size,
-                device=torch.device('cpu')),
+                device=torch.device(0)),
             trajectory=trajectory,
             buffer_size=buffer_size,
             batch_size=batch_size)
@@ -202,7 +203,7 @@ def main(num_workers):
 
 
 if __name__ == '__main__':
-    ray.init()
+    ray.init(num_gpus=1)
     cpu_count = multiprocessing.cpu_count()
-    cpu_count = 4
+    cpu_count = 32
     main(num_workers=cpu_count)
